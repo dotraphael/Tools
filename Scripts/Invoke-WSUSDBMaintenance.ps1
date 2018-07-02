@@ -32,6 +32,8 @@
                   #https://stevethompsonmvp.wordpress.com/2018/05/01/enhancing-wsus-database-cleanup-performance-sql-script/
                   #https://deploymentresearch.com/Research/Post/665/Fixing-WSUS-When-the-Best-Defense-is-a-Good-Offense
                   #https://blogs.technet.microsoft.com/sus/2009/03/04/clearing-the-synchronization-history-in-the-wsus-console/
+		LastUpdate: 02/07/2018 (v0.4)
+		  #changed delete tbEventInstance added eventid 302,303 and changed datediff to day instead of month
 
 		Based on code from https://gallery.technet.microsoft.com/scriptcenter/Invoke-WSUSDBMaintenance-af2a3a79
 		T-SQL Code used from http://gallery.technet.microsoft.com/scriptcenter/6f8cde49-5c52-4abd-9820-f1d270ddea61
@@ -96,7 +98,7 @@ Write-Log -logtype "Info" -logmessage "Append log in an existing log file"
 #endregion
 
 $DeleteHistory = @"
-    DELETE FROM tbEventInstance WHERE EventNamespaceID = '2' AND EVENTID IN ('381', '382', '384', '386', '387', '389') AND DATEDIFF(month, TimeAtServer, CURRENT_TIMESTAMP) >= 3
+    DELETE FROM tbEventInstance WHERE EventNamespaceID = '2' AND EVENTID IN ('302', '303', '381', '382', '384', '386', '387', '389') AND DATEDIFF(day, TimeAtServer, CURRENT_TIMESTAMP) >= 3
 "@
 
 $ObsoleteCleanUp = @"
