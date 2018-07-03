@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+  <about LOGO="logo.png" DNSDomain="CORP.LOCAL" timestamp="DeploymentDateTime" platform="DeploymentArchitecture" hardwareclass="HardwareModel" deployversion="DeploymentVersion" tasksequence="DeploymentName" tasksequencestatus="DeploymentStatus" registryhive="Registry::HKEY_LOCAL_MACHINE\SOFTWARE\CORP\BUILD"/>
+</root>
