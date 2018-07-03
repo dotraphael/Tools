@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+  <icon iconfile="get_info.ico" icontext="System Information" program="powershell.exe" params="NotificationIcon.ps1" bold="true" />
+</root>
