@@ -60,6 +60,9 @@ param(
     [ValidateNotNullOrEmpty()]        
     $Style = 'Stretch'
 )
+
+$StartUpVariables = Get-Variable
+
 #region Functions
 #region c# functions
 add-type @"
@@ -159,11 +162,9 @@ Function Set-RFLLogPath {
     .EXAMPLE
         Set-RFLLogPath
 #>
-    #check if running on TSEnvironment
-    try {
-        $tsenv = New-Object -ComObject Microsoft.SMS.TSEnvironment -ErrorAction Stop
-        $script:LogFilePath = $tsenv.Value("_SMSTSLogPath")
-    } catch { }
+    if ([string]::IsNullOrEmpty($script:LogFilePath)) {
+        $script:LogFilePath = $env:Temp
+    }
 
     if(Test-RFLAdministrator) {
         # Script is running Administrator privileges
@@ -172,6 +173,12 @@ Function Set-RFLLogPath {
         }
     }
     
+    #check if running on TSEnvironment
+    try {
+        $tsenv = New-Object -ComObject Microsoft.SMS.TSEnvironment -ErrorAction Stop
+        $script:LogFilePath = $tsenv.Value("_SMSTSLogPath")
+    } catch { }
+
     $script:ScriptLogFilePath = "$($script:LogFilePath)\$($Script:LogFileFileName)"
 }
 #endregion
@@ -452,7 +459,16 @@ try {
     Remove-Item -Path $ImageDestination -Force
 } catch {
     Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
+    Exit 3000
 } finally {
+    Get-Variable | Where-Object { ($StartUpVariables.Name -notcontains $_.Name) -and (@('StartUpVariables','ScriptLogFilePath') -notcontains $_.Name) } | ForEach-Object {
+        Try { 
+            Write-RFLLog -Message "Removing Variable $($_.Name)"
+            Remove-Variable -Name "$($_.Name)" -Force -Scope "global" -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
+        } Catch { 
+            Write-RFLLog -Message "Unable to remove variable $($_.Name)"
+        }
+    }
     Write-RFLLog -Message "*** Ending ***"
 }
 #endregion

@@ -29,12 +29,16 @@
     .NOTES
         Name: Set-BackgroundWallpaper
         Author: Raphael Perez
-        Convert to EXE: Follow https://github.com/MScholtes/PS2EXE (ps2exe .\Set-BackgroundWallpaper.ps1 .\Set-BackgroundWallpaper.exe -verbose  -x64  -noConsole -title 'Set Background Wallpaper' -company 'RFL Systems Ltd' -product 'Set BackGround Wallpaper' -copyright 'Copyright © 2012-2020 RFL Systems Ltd' -version '0.3' -configFile)
+        Convert to EXE: Follow https://github.com/MScholtes/PS2EXE (ps2exe .\Set-BackgroundWallpaper.ps1 .\Set-BackgroundWallpaper.exe -verbose  -x64  -noConsole -title 'Set Background Wallpaper' -company 'RFL Systems Ltd' -product 'Set BackGround Wallpaper' -copyright 'Copyright © 2012-2021 RFL Systems Ltd' -version '0.5' -configFile)
         DateCreated: 22 October 2019 (v0.1)
         Update: 03 March 2020 (v0.2)
                 #added check to use bginfo64 when 64bit devices
         Update: 21 August 2020 (v0.3)
                 #fixed error when writting log on exe file
+        Update: 01 September 2020 (v0.4)
+                #added ACL change to avoid file get blocked by an administrator
+        Update: 22 April 2021 (v0.5)
+                #Small update on the log file location detection
 
     .EXAMPLE
         Set-BackgroundWallpaper.ps1 -UseBGInfo -SetWallPaper
@@ -57,8 +61,11 @@ param(
     $Style = 'Stretch'
 )
 
+$StartUpVariables = Get-Variable
+
+
 #region Variables
-$script:ScriptVersion = '0.3'
+$script:ScriptVersion = '0.4'
 $script:LogFilePath = $env:Temp
 $Script:LogFileFileName = 'Set-BackgroundWallpaper.log'
 $script:ScriptLogFilePath = "$($script:LogFilePath)\$($Script:LogFileFileName)"
@@ -109,11 +116,9 @@ Function Set-RFLLogPath {
     .EXAMPLE
         Set-RFLLogPath
 #>
-    #check if running on TSEnvironment
-    try {
-        $tsenv = New-Object -ComObject Microsoft.SMS.TSEnvironment -ErrorAction Stop
-        $script:LogFilePath = $tsenv.Value("_SMSTSLogPath")
-    } catch { }
+    if ([string]::IsNullOrEmpty($script:LogFilePath)) {
+        $script:LogFilePath = $env:Temp
+    }
 
     if(Test-RFLAdministrator) {
         # Script is running Administrator privileges
@@ -122,6 +127,12 @@ Function Set-RFLLogPath {
         }
     }
     
+    #check if running on TSEnvironment
+    try {
+        $tsenv = New-Object -ComObject Microsoft.SMS.TSEnvironment -ErrorAction Stop
+        $script:LogFilePath = $tsenv.Value("_SMSTSLogPath")
+    } catch { }
+
     $script:ScriptLogFilePath = "$($script:LogFilePath)\$($Script:LogFileFileName)"
 }
 #endregion
@@ -174,7 +185,11 @@ param (
     $LineFormat = $Message, $TimeGenerated, (Get-Date -Format MM-dd-yyyy), "$($ScriptName):$($MyInvocation.ScriptLineNumber)", $LogLevel
     $Line = $Line -f $LineFormat
 
-    $Line | Out-File -FilePath $script:ScriptLogFilePath -Append -NoClobber -Encoding default
+    try {
+        $Line | Out-File -FilePath $script:ScriptLogFilePath -Append -NoClobber -Encoding default
+    } catch {
+        #
+    }
 }
 #endregion
 
@@ -293,8 +308,7 @@ namespace Wallpaper
 #endregion
 
 #region Get-Divisors
-function Get-Divisors($n)
-{
+function Get-Divisors($n) {
     $div = @();
     foreach ($i in 1 .. ($n/3))
     {
@@ -310,8 +324,7 @@ function Get-Divisors($n)
 #endregion
 
 #region Get-CommonDivisors
-function Get-CommonDivisors($x, $y)
-{
+function Get-CommonDivisors($x, $y) {
     $xd = Get-Divisors $x;
     $yd = Get-Divisors $y;
     $div = @();
@@ -321,16 +334,14 @@ function Get-CommonDivisors($x, $y)
 #endregion
 
 #region Get-GreatestCommonDivisor
-function Get-GreatestCommonDivisor($x, $y)
-{
+function Get-GreatestCommonDivisor($x, $y) {
     $d = Get-CommonDivisors $x $y;
     $d[$d.Length-1];
 }
 #endregion
 
 #region Get-Ratio
-function Get-Ratio($x, $y)
-{
+function Get-Ratio($x, $y) {
     $d = Get-GreatestCommonDivisor $x $y;
     New-Object PSObject -Property @{ 
         X = $x;
@@ -344,10 +355,21 @@ function Get-Ratio($x, $y)
 #endregion
 
 #region Set-WallPaper
-Function Set-WallPaper($Value)
-{
+Function Set-WallPaper($Value) {
     Write-RFLLog -Message "Copying file from $($Value) to $($DefaultWallPaper)"
     Copy-Item -Path $Value -Destination $DefaultWallPaper -Force
+    Start-Sleep 5
+    Write-RFLLog -Message "Setting ACL for $($DefaultWallPaper)"
+    try {
+        $acl = Get-Acl -Path $DefaultWallPaper
+        $AccessRule = New-Object System.Security.AccessControl.FileSystemAccessRule("EVERYONE","FullControl","Allow")
+
+        $acl.SetAccessRule($AccessRule)
+        $acl | Set-Acl  -Path $DefaultWallPaper
+    } catch {
+        Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
+    }
+
     if ($SetWallPaper -eq $true) {
         Write-RFLLog -Message "Setting wallpaper with style $($Style)"
         New-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name Wallpaper -PropertyType String -Value "$DefaultWallPaper" -Force | Out-Null
@@ -376,14 +398,10 @@ try {
     Write-RFLLog -Message "*** Starting ***"
     Write-RFLLog -Message "Script version $script:ScriptVersion"
     Write-RFLLog -Message "Running as $env:username $(if(Test-RFLAdministrator) {"[Administrator]"} Else {"[Not Administrator]"}) on $env:computername"
-    Write-RFLLog -Message "Parameter - UseBGInfo: $($UseBGInfo)"
-    Write-RFLLog -Message "Parameter - SetWallPaper: $($SetWallPaper)"
-    Write-RFLLog -Message "Parameter - WallpaperFolder: $($WallpaperFolder)"
-    Write-RFLLog -Message "Parameter - BGInfoFolder: $($BGInfoFolder)"
-    Write-RFLLog -Message "Parameter - BGInfoFile: $($BGInfoFile)"
-    Write-RFLLog -Message "Parameter - WallpaperFileName: $($WallpaperFileName)"
-    Write-RFLLog -Message "Parameter - DefaultWallPaper: $($DefaultWallPaper)"
-    Write-RFLLog -Message "Parameter - Style: $($Style)"
+    $PSCmdlet.MyInvocation.BoundParameters.Keys | ForEach-Object { 
+        Write-RFLLog -Message "Parameter '$($_)' is '$($PSCmdlet.MyInvocation.BoundParameters.Item($_))'"
+    }
+
     ##Get the Current Screen Resolution from WMI and set the variables.
     #$CurrentResolution = Get-WMIObject Win32_DesktopMonitor | where {$_.DeviceID -eq 'DesktopMonitor1'} | Select-Object ScreenWidth,ScreenHeight
     #$CurrentXResolution = $CurrentResolution.ScreenWidth
@@ -428,8 +446,16 @@ try {
     }
 } catch {
     Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
+    Exit 3000
 } finally {
-    Write-RFLLog -Message "*** Ending import of local group policy"
+    Get-Variable | Where-Object { ($StartUpVariables.Name -notcontains $_.Name) -and (@('StartUpVariables','ScriptLogFilePath') -notcontains $_.Name) } | ForEach-Object {
+        Try { 
+            Write-RFLLog -Message "Removing Variable $($_.Name)"
+            Remove-Variable -Name "$($_.Name)" -Force -Scope "global" -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
+        } Catch { 
+            Write-RFLLog -Message "Unable to remove variable $($_.Name)"
+        }
+    }
+    Write-RFLLog -Message "*** Ending ***"
 }
-
 #endregion
