@@ -29,7 +29,7 @@
     .NOTES
         Name: Set-BackgroundWallpaper
         Author: Raphael Perez
-        Convert to EXE: Follow https://github.com/MScholtes/PS2EXE (ps2exe .\Set-BackgroundWallpaper.ps1 .\Set-BackgroundWallpaper.exe -verbose  -x64  -noConsole -title 'Set Background Wallpaper' -company 'RFL Systems Ltd' -product 'Set BackGround Wallpaper' -copyright 'Copyright © 2012-2021 RFL Systems Ltd' -version '0.5' -configFile)
+        Convert to EXE: Follow https://github.com/MScholtes/PS2EXE (ps2exe .\Set-BackgroundWallpaper.ps1 .\Set-BackgroundWallpaper.exe -verbose  -x64  -noConsole -title 'Set Background Wallpaper' -company 'RFL Systems Ltd' -product 'Set BackGround Wallpaper' -copyright 'Copyright © 2012-2022 RFL Systems Ltd' -version '0.7' -configFile)
         DateCreated: 22 October 2019 (v0.1)
         Update: 03 March 2020 (v0.2)
                 #added check to use bginfo64 when 64bit devices
@@ -39,6 +39,11 @@
                 #added ACL change to avoid file get blocked by an administrator
         Update: 22 April 2021 (v0.5)
                 #Small update on the log file location detection
+        Update: 09 June 2021 (v0.6)
+                #Small update
+        Update: 10 March 2022 (v0.7)
+                #copy wallpaper if file is different (using MD5 file hash)
+                #changed the dllimport SetLastError to false so it will not show error
 
     .EXAMPLE
         Set-BackgroundWallpaper.ps1 -UseBGInfo -SetWallPaper
@@ -61,11 +66,8 @@ param(
     $Style = 'Stretch'
 )
 
-$StartUpVariables = Get-Variable
-
-
 #region Variables
-$script:ScriptVersion = '0.4'
+$script:ScriptVersion = '0.7'
 $script:LogFilePath = $env:Temp
 $Script:LogFileFileName = 'Set-BackgroundWallpaper.log'
 $script:ScriptLogFilePath = "$($script:LogFilePath)\$($Script:LogFileFileName)"
@@ -266,7 +268,7 @@ namespace Wallpaper
       public const int UpdateIniFile = 0x01;
       public const int SendWinIniChange = 0x02;
 
-      [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+      [DllImport("user32.dll", SetLastError = false, CharSet = CharSet.Auto)] 
       private static extern int SystemParametersInfo (int uAction, int uParam, string lpvParam, int fuWinIni);
       
       public static void SetWallpaper ( string path, Wallpaper.Style style ) {
@@ -357,23 +359,45 @@ function Get-Ratio($x, $y) {
 #region Set-WallPaper
 Function Set-WallPaper($Value) {
     Write-RFLLog -Message "Copying file from $($Value) to $($DefaultWallPaper)"
-    Copy-Item -Path $Value -Destination $DefaultWallPaper -Force
-    Start-Sleep 5
-    Write-RFLLog -Message "Setting ACL for $($DefaultWallPaper)"
-    try {
-        $acl = Get-Acl -Path $DefaultWallPaper
-        $AccessRule = New-Object System.Security.AccessControl.FileSystemAccessRule("EVERYONE","FullControl","Allow")
+    if (Test-Path -Path $Value) {
+        $NewFile = Get-FileHash -Path $Value -Algorithm MD5
+        Write-RFLLog -Message "New File ($($Value)) Hash is $($NewFile.Hash)"
+    }
 
-        $acl.SetAccessRule($AccessRule)
-        $acl | Set-Acl  -Path $DefaultWallPaper
-    } catch {
-        Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
+    if (Test-Path -Path $DefaultWallPaper) {
+        $ExistingFile = Get-FileHash -Path $Value -Algorithm MD5
+        Write-RFLLog -Message "Existing file ($($DefaultWallPaper)) Hash is $($ExistingFile.Hash)"
+    } else {
+        Write-RFLLog -Message "Old file does not exist. Empty hash" -LogLevel 2
+    }
+
+    if ($NewFile.Hash -eq $ExistingFile.Hash) {
+        Write-RFLLog -Message "Hash value is of the new and old file are the same. Copy file has been ignored" -LogLevel 2
+    } else {
+        Write-RFLLog -Message "Hash value is different. Copying file is required"
+        Copy-Item -Path $Value -Destination $DefaultWallPaper -Force
+        Start-Sleep 5
+
+        Write-RFLLog -Message "Setting ACL for $($DefaultWallPaper)"
+        try {
+            $acl = Get-Acl -Path $DefaultWallPaper
+            $AccessRule = New-Object System.Security.AccessControl.FileSystemAccessRule("EVERYONE","FullControl","Allow")
+
+            $acl.SetAccessRule($AccessRule)
+            $acl | Set-Acl -Path $DefaultWallPaper
+        } catch {
+            Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
+        }
     }
 
     if ($SetWallPaper -eq $true) {
-        Write-RFLLog -Message "Setting wallpaper with style $($Style)"
-        New-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name Wallpaper -PropertyType String -Value "$DefaultWallPaper" -Force | Out-Null
-        [Wallpaper.Setter]::SetWallpaper( (Convert-Path $DefaultWallPaper), $Style ) | Out-Null
+        try {
+            Write-RFLLog -Message "Setting wallpaper with style $($Style)"
+            New-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name Wallpaper -PropertyType String -Value "$DefaultWallPaper" -Force | Out-Null
+            [Wallpaper.Setter]::SetWallpaper( (Convert-Path $DefaultWallPaper), $Style ) | Out-Null
+        } catch {
+            Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
+        }
     }
 }
 #endregion
@@ -437,7 +461,9 @@ try {
     if ($UseBGInfo -eq $true) {
         $bgInfoFileName = "bginfo.exe"
         if ((Get-Architecture) -eq "X64") { $bgInfoFileName = "Bginfo64.exe" }
-        if (!(Test-Path -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers')) { New-Item -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags' -Name "Layers" -Force | Out-Null }
+        if (!(Test-Path -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers')) { 
+            New-Item -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags' -Name "Layers" -Force | Out-Null 
+        }
    
         New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers' -Name "$($BGInfoFolder)\$($bgInfoFileName)" -PropertyType String -Value "~ HIGHDPIAWARE" -Force | Out-Null
         Write-RFLLog -Message "BGInfo Commandline: `"$($BGInfoFolder)\$($bgInfoFileName)`" `"$($BGInfoFolder)\$($BGInfoFile)`" /timer:0 /silent /nolicprompt"
@@ -448,14 +474,6 @@ try {
     Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
     Exit 3000
 } finally {
-    Get-Variable | Where-Object { ($StartUpVariables.Name -notcontains $_.Name) -and (@('StartUpVariables','ScriptLogFilePath') -notcontains $_.Name) } | ForEach-Object {
-        Try { 
-            Write-RFLLog -Message "Removing Variable $($_.Name)"
-            Remove-Variable -Name "$($_.Name)" -Force -Scope "global" -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
-        } Catch { 
-            Write-RFLLog -Message "Unable to remove variable $($_.Name)"
-        }
-    }
     Write-RFLLog -Message "*** Ending ***"
 }
 #endregion

@@ -32,6 +32,9 @@
         Convert to EXE: Follow https://github.com/MScholtes/PS2EXE
         Invoke-ps2exe .\Set-BingBackgroundWallpaper.ps1 .\Set-BingBackgroundWallpaper.exe -STA -noConsole -configFile
         DateCreated: 28 April 2020 (v0.1)
+        Update: 22 March 2022 (v0.2)
+                #copy wallpaper if file is different (using MD5 file hash)
+                #changed the dllimport SetLastError to false so it will not show error
 
     .EXAMPLE
         .\Set-BingBackgroundWallpaper.ps1 -locale 'en-GB' -UseBGInfo -SetWallPaper
@@ -61,8 +64,6 @@ param(
     $Style = 'Stretch'
 )
 
-$StartUpVariables = Get-Variable
-
 #region Functions
 #region c# functions
 add-type @"
@@ -82,7 +83,7 @@ namespace Wallpaper
       public const int UpdateIniFile = 0x01;
       public const int SendWinIniChange = 0x02;
 
-      [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+      [DllImport("user32.dll", SetLastError = false, CharSet = CharSet.Auto)]
       private static extern int SystemParametersInfo (int uAction, int uParam, string lpvParam, int fuWinIni);
       
       public static void SetWallpaper ( string path, Wallpaper.Style style ) {
@@ -339,11 +340,45 @@ function Get-Ratio($x, $y) {
 Function Set-WallPaper($Value)
 {
     Write-RFLLog -Message "Copying $($Value) to $($DefaultWallPaper)"
-    Copy-Item -Path $Value -Destination $DefaultWallPaper -Force
+    if (Test-Path -Path $Value) {
+        $NewFile = Get-FileHash -Path $Value -Algorithm MD5
+        Write-RFLLog -Message "New File ($($Value)) Hash is $($NewFile.Hash)"
+    }
+
+    if (Test-Path -Path $DefaultWallPaper) {
+        $ExistingFile = Get-FileHash -Path $Value -Algorithm MD5
+        Write-RFLLog -Message "Existing file ($($DefaultWallPaper)) Hash is $($ExistingFile.Hash)"
+    } else {
+        Write-RFLLog -Message "Old file does not exist. Empty hash" -LogLevel 2
+    }
+
+    if ($NewFile.Hash -eq $ExistingFile.Hash) {
+        Write-RFLLog -Message "Hash value is of the new and old file are the same. Copy file has been ignored" -LogLevel 2
+    } else {
+        Write-RFLLog -Message "Hash value is different. Copying file is required"
+        Copy-Item -Path $Value -Destination $DefaultWallPaper -Force
+        Start-Sleep 5
+
+        Write-RFLLog -Message "Setting ACL for $($DefaultWallPaper)"
+        try {
+            $acl = Get-Acl -Path $DefaultWallPaper
+            $AccessRule = New-Object System.Security.AccessControl.FileSystemAccessRule("EVERYONE","FullControl","Allow")
+
+            $acl.SetAccessRule($AccessRule)
+            $acl | Set-Acl -Path $DefaultWallPaper
+        } catch {
+            Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
+        }
+    }
+
     if ($SetWallPaper -eq $true) {
-        Write-RFLLog -Message "Updating wallpapper $($DefaultWallPaper)"
-        New-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name Wallpaper -PropertyType String -Value "$DefaultWallPaper" -Force | Out-Null
-        [Wallpaper.Setter]::SetWallpaper( (Convert-Path $DefaultWallPaper), $Style ) | Out-Null
+        try {
+            Write-RFLLog -Message "Updating wallpapper $($DefaultWallPaper)"
+            New-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name Wallpaper -PropertyType String -Value "$DefaultWallPaper" -Force | Out-Null
+            [Wallpaper.Setter]::SetWallpaper( (Convert-Path $DefaultWallPaper), $Style ) | Out-Null
+        } catch {
+            Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
+        }
     }
 }
 #endregion
@@ -461,14 +496,6 @@ try {
     Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
     Exit 3000
 } finally {
-    Get-Variable | Where-Object { ($StartUpVariables.Name -notcontains $_.Name) -and (@('StartUpVariables','ScriptLogFilePath') -notcontains $_.Name) } | ForEach-Object {
-        Try { 
-            Write-RFLLog -Message "Removing Variable $($_.Name)"
-            Remove-Variable -Name "$($_.Name)" -Force -Scope "global" -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
-        } Catch { 
-            Write-RFLLog -Message "Unable to remove variable $($_.Name)"
-        }
-    }
     Write-RFLLog -Message "*** Ending ***"
 }
 #endregion
