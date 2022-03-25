@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Applications>
+	<Add> <!-- Add/Remove --> <!-- TODO: Replace/Retire -->
+		<FolderType>PROD</FolderType> <!-- Prod/UAT/Test -->
+		<Manufacturer>Adobe Systems Inc</Manufacturer>
+		<Location>Global</Location>
+		<Product>Adobe Acrobat Reader DC</Product>
+		<Version>15.007.20033</Version>
+		<Icon>F:\SoftwareLib\DSL\Adobe Systems Inc\Adobe Acrobat Reader DC\15.007.20033 (x86)\Icon.png</Icon>
+		<UserDocumentation>https://acrobat.adobe.com/uk/en/acrobat/pdf-reader.html</UserDocumentation>
+		<LinkText>http://www.google2.com</LinkText>
+		<PrivacyUrl>http://www.google3.com</PrivacyUrl>
+		<Description>description</Description>
+		<keywords>
+			<keyword>keyword1</keyword>
+			<keyword>keyword2</keyword>
+		</keywords>
+		<DeploymentType> <!-- MSI/EXE -->
+			<EXE>
+				<Location>Global</Location>
+				<SourceFolder>F:\Temp\Test\6baa13d95-111d-404e-989c-1bdba405f811</SourceFolder>
+				<Language>EN</Language>
+				<Architecture>x86</Architecture>
+				<PkgVersion>002</PkgVersion>
+				<InstallProgram>Install.bat</InstallProgram>
+				<UninstallProgram>Uninstall.bat</UninstallProgram>
+				<RepairProgram></RepairProgram>
+				<EstimatedRunTime>10</EstimatedRunTime>
+				<DetectionMethods>
+					<WindowsInstaller>
+						<Connector>And</Connector> <!-- And/Or -->
+						<MSICode>9900a338-484b-4a18-884e-bce87654ce1b</MSICode>
+						<Operator>IsEquals</Operator> <!-- IsEquals, NotEquals, GreaterThan, LessThan, Between, GreaterEquals, LessEquals, OneOf, NoneOf, BeginsWith, NotBeginsWith, EndsWith, NotEndsWith, Contains, NotContains -->
+						<Property>ProductVersion</Property>
+						<Value>1.1.1.1</Value>
+					</WindowsInstaller>
+					<WindowsInstaller>
+						<Connector>And</Connector> <!-- And/Or -->
+						<MSICode>9900a338-484b-4a18-884e-bce87654ce1b</MSICode>
+					</WindowsInstaller>
+					<Directory>
+						<Connector>And</Connector> <!-- And/Or -->
+						<Architecture>32bit</Architecture>
+						<Path>c:\</Path>
+						<Name>Temp</Name>
+					</Directory>
+					<Directory>
+						<Connector>Or</Connector> <!-- And/Or -->
+						<Architecture>64bit</Architecture>
+						<Path>c:\</Path>
+						<Name>Temp2</Name>
+					</Directory>
+					<File>
+						<Connector>And</Connector> <!-- And/Or -->
+						<Architecture>32bit</Architecture>
+						<Path>c:\Temp</Path>
+						<Name>Temp.docx</Name>
+					</File>
+					<File>
+						<Connector>And</Connector> <!-- And/Or -->
+						<Architecture>32bit</Architecture>
+						<Path>c:\Temp</Path>
+						<Name>Temp.docx</Name>
+						<Operator>IsEquals</Operator> <!-- IsEquals, NotEquals, GreaterThan, LessThan, Between, GreaterEquals, LessEquals, OneOf, NoneOf, BeginsWith, NotBeginsWith, EndsWith, NotEndsWith, Contains, NotContains -->
+						<Property>Version</Property>
+						<Value>1.1.1.1</Value>
+					</File>
+					<File>
+						<Connector>Or</Connector> <!-- And/Or -->
+						<Architecture>64bit</Architecture>
+						<Path>c:\Temp</Path>
+						<Name>Temp.docx</Name>
+						<Operator>GreaterEquals</Operator> <!-- IsEquals, NotEquals, GreaterThan, LessThan, Between, GreaterEquals, LessEquals, OneOf, NoneOf, BeginsWith, NotBeginsWith, EndsWith, NotEndsWith, Contains, NotContains -->
+						<Property>Version</Property>
+						<Value>1.0.0.0</Value>
+					</File>
+					<RegistryKey>
+						<Connector>Or</Connector> <!-- And/Or -->
+						<Architecture>64bit</Architecture> 
+						<Hive>ClassesRoot</Hive> <!-- ClassesRoot, CurrentConfig, CurrentUser, LocalMachine, Users -->
+						<KeyName>.7z</KeyName>
+					</RegistryKey>
+					<RegistryKey>
+						<Connector>Or</Connector> <!-- And/Or -->
+						<Architecture>32bit</Architecture> 
+						<Hive>LocalMachine</Hive> <!-- ClassesRoot, CurrentConfig, CurrentUser, LocalMachine, Users -->
+						<KeyName>Software\Corp</KeyName>
+					</RegistryKey>
+					<RegistryKeyValue>
+						<Connector>Or</Connector> <!-- And/Or -->
+						<Architecture>64bit</Architecture> 
+						<Hive>LocalMachine</Hive> <!-- ClassesRoot, CurrentConfig, CurrentUser, LocalMachine, Users -->
+						<KeyName>SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{001D5C5A-B8A6-42BC-A588-20F0F3CFD749}</KeyName>
+						<ValueName>DisplayVersion</ValueName>
+						<PropertyType>Version</PropertyType> <!-- Version, Integer, String -->
+					</RegistryKeyValue>
+					<RegistryKeyValue>
+						<Connector>Or</Connector> <!-- And/Or -->
+						<Architecture>32bit</Architecture> 
+						<Hive>LocalMachine</Hive> <!-- ClassesRoot, CurrentConfig, CurrentUser, LocalMachine, Users -->
+						<KeyName>SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{001D5C5A-B8A6-42BC-A588-20F0F3CFD749}</KeyName>
+						<ValueName>DisplayVersion</ValueName>
+						<PropertyType>Version</PropertyType> <!-- Version, Integer, String -->
+					</RegistryKeyValue>
+					<RegistryKeyValue>
+						<Connector>Or</Connector> <!-- And/Or -->
+						<Architecture>32bit</Architecture> 
+						<Hive>LocalMachine</Hive> <!-- ClassesRoot, CurrentConfig, CurrentUser, LocalMachine, Users -->
+						<KeyName>SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{001D5C5A-B8A6-42BC-A588-20F0F3CFD749}</KeyName>
+						<ValueName>DisplayVersion</ValueName>
+						<PropertyType>Version</PropertyType> <!-- Version, Integer, String -->
+						<Operator>GreaterEquals</Operator> <!-- IsEquals, NotEquals, GreaterThan, LessThan, Between, GreaterEquals, LessEquals, OneOf, NoneOf, BeginsWith, NotBeginsWith, EndsWith, NotEndsWith, Contains, NotContains -->
+						<Value>1.0.0.0</Value>
+					</RegistryKeyValue>
+					<RegistryKeyValue>
+						<Connector>Or</Connector> <!-- And/Or -->
+						<Architecture>64bit</Architecture> 
+						<Hive>LocalMachine</Hive> <!-- ClassesRoot, CurrentConfig, CurrentUser, LocalMachine, Users -->
+						<KeyName>SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{001D5C5A-B8A6-42BC-A588-20F0F3CFD749}</KeyName>
+						<ValueName>DisplayVersion</ValueName>
+						<PropertyType>Version</PropertyType> <!-- Version, Integer, String -->
+						<Operator>GreaterEquals</Operator> <!-- IsEquals, NotEquals, GreaterThan, LessThan, Between, GreaterEquals, LessEquals, OneOf, NoneOf, BeginsWith, NotBeginsWith, EndsWith, NotEndsWith, Contains, NotContains -->
+						<Value>1.0.0.0</Value>
+					</RegistryKeyValue>
+				</DetectionMethods>
+				<Requirements>
+					<OperatingSystem>
+						<Operator>OneOf</Operator>
+						<Values> <!-- Get-CMConfigurationPlatform -Fast | select LocalizedDisplayName | Format-Table -->
+							<Value>All Windows 10 Professional/Enterprise and higher (32-bit)</Value>
+							<Value>All Windows 10 Professional/Enterprise and higher (64-bit)</Value>
+						</Values>
+					</OperatingSystem>
+					<FreeSpace>
+						<Partition>Special</Partition> <!-- Any: Any drive on the device, System: The Windows system drive, Special -->
+						<Operator>GreaterEquals</Operator> <!-- IsEquals, NotEquals, GreaterThan, GreaterEquals, LessThan, LessEquals, Between -->
+						<Value1>100</Value1>
+						<Value2>100</Value2> <!-- If you use a Operator is Between, use this parameter to specify the upper value. -->
+						<DriveLetter>E:</DriveLetter> <!-- If you use a Partition Special, use this parameter to specify the drive letter -->
+					</FreeSpace>
+					<FreeSpace>
+						<Partition>Any</Partition> <!-- Any: Any drive on the device, System: The Windows system drive, Special -->
+						<Operator>Between</Operator> <!-- IsEquals, NotEquals, GreaterThan, GreaterEquals, LessThan, LessEquals, Between -->
+						<Value1>100</Value1>
+						<Value2>200</Value2> <!-- If you use a Operator is Between, use this parameter to specify the upper value. -->
+					</FreeSpace>
+					<FreeSpace>
+						<Partition>System</Partition> <!-- Any: Any drive on the device, System: The Windows system drive, Special -->
+						<Operator>IsEquals</Operator> <!-- IsEquals, NotEquals, GreaterThan, GreaterEquals, LessThan, LessEquals, Between -->
+						<Value1>100</Value1>
+						<Value2>0</Value2>
+					</FreeSpace>
+					<Custom>
+						<Name>.NET 3.5</Name>
+						<Value1>True</Value1> <!-- True/False -> The selected global condition must exist/not exist  on client devices -->
+					</Custom>
+					<Custom>
+						<Name>Device Vendor</Name>
+						<Operator>IsEquals</Operator> <!-- And, Or, Other, IsEquals, NotEquals, GreaterThan, LessThan, Between, NotBetween, GreaterEquals, LessEquals, BeginsWith, NotBeginsWith, EndsWith, NotEndsWith, Contains, NotContains, AllOf, OneOf, NoneOf, SetEquals, SubsetOf, ExcludesAll -->
+						<Value1>Dell</Value1>
+						<Value2>Dell</Value2> <!-- If you use a Operator is Between, use this parameter to specify the upper value. -->
+					</Custom>
+				</Requirements>
+				<Dependencies>
+					<Group>
+						<GroupName>Group1</GroupName>
+						<AutoInstall>true</AutoInstall>
+						<Applications>
+							<application>APPP Global 1E Ltd 1E Client 5.1.0.922</application>
+							<application>APPP Global 1E Ltd 1E Client 5.1.0.922 (Q21485)</application>
+						</Applications>
+					</Group>
+					<Group>
+						<GroupName>Group2</GroupName>
+						<AutoInstall>false</AutoInstall>
+						<Applications>
+							<application>APPP Global Adobe Systems Inc Adobe Acrobat Reader DC 20.013.20074</application>
+						</Applications>
+					</Group>
+				</Dependencies>
+				<ExitCodes>
+					<ExitCode>
+						<Code>1</Code>
+						<Name>Name</Name>
+						<Description>Description</Description>
+						<Class>Failure</Class> <!-- Failure,  Success, SoftReboot, HardReboot, FastRetry-->
+					</ExitCode>
+					<ExitCode>
+						<Code>1</Code>
+						<Name>Name2</Name>
+						<Description>Description2</Description>
+						<Class>Failure</Class> <!-- Failure,  Success, SoftReboot, HardReboot, FastRetry-->
+					</ExitCode>
+					<ExitCode>
+						<Code>2</Code>
+						<Class>Success</Class> <!-- Failure,  Success, SoftReboot, HardReboot, FastRetry-->
+					</ExitCode>
+					<ExitCode>
+						<Code>3</Code>
+						<Class>HardReboot</Class> <!-- Failure,  Success, SoftReboot, HardReboot, FastRetry-->
+					</ExitCode>
+					<ExitCode>
+						<Code>4</Code>
+						<Class>FastRetry</Class> <!-- Failure,  Success, SoftReboot, HardReboot, FastRetry-->
+					</ExitCode>
+				</ExitCodes>
+			</EXE>
+			<MSI>
+				<Location>Global</Location>
+				<SourceFolder>F:\Temp\Test\67acdc46-89dc-438c-a508-a26b1f02aeaa</SourceFolder>
+				<Language>EN</Language>
+				<Architecture>x64</Architecture>
+				<PkgVersion>001</PkgVersion>
+				<MSIFile>1E.Client-x64.msi</MSIFile>
+				<EstimatedRunTime>10</EstimatedRunTime>
+				<Requirements>
+					<OperatingSystem>
+						<Operator>OneOf</Operator>
+						<Values> <!-- Get-CMConfigurationPlatform -Fast | select LocalizedDisplayName | Format-Table -->
+							<Value>All Windows 10 Professional/Enterprise and higher (64-bit)</Value>
+						</Values>
+					</OperatingSystem>
+				</Requirements>
+			</MSI>
+		</DeploymentType>
+	</Add>
+</Applications>
