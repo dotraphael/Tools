@@ -1,19 +1,19 @@
 <#
     .SYSNOPSIS
-        Remediate the Local Administrator User
+        Force the Reinstall of All Application without Reboot
 
     .DESCRIPTION
-        Create a local admin user
+        Force the Reinstall of All Application without Rebbot
 
     .NOTES
-        Name: Remediate-LocalAdministrator
+        Name: Discover-ForceReinstallAllAppsWithoutReboot.ps1
         Author: Raphael Perez
         Email: raphael@perez.net.br
         Source: https://github.com/dotraphael/Tools/tree/master/Scripts
-        DateCreated: 02 July 2024 (v0.1)
+        DateCreated: 18 February 2024 (v0.1)
 
     .EXAMPLE
-        .\Remediate-LocalAdministrator.ps1
+        .\Discover-ForceReinstallAllAppsWithoutReboot.ps1
 #>
 #requires -version 5
 [CmdletBinding()]
@@ -179,7 +179,7 @@ function Get-ScriptDirectory {
 #region Variables
 $script:ScriptVersion = '0.1'
 $script:LogFilePath = $env:Temp
-$Script:LogFileFileName = 'Remediate-LocalAdministrator.log'
+$Script:LogFileFileName = 'Remediate-ForceReinstallAllApp.log'
 $script:ScriptLogFilePath = "$($script:LogFilePath)\$($Script:LogFileFileName)"
 #endregion
 
@@ -197,57 +197,48 @@ try {
         Write-RFLLog -Message "Parameter '$($_)' is '$($PSCmdlet.MyInvocation.BoundParameters.Item($_))'"
     }
 
-    $PSVersionTable.Keys | ForEach-Object { 
-        Write-RFLLog -Message "PSVersionTable '$($_)' is '$($PSVersionTable.Item($_) -join (', '))'"
-    }
+    $Path = "REGISTRY::HKLM\SOFTWARE\Microsoft\IntuneManagementExtension\Win32Apps"
+    if (Test-Path -Path $Path) {
+        Write-RFLLog -Message "Path '$($Path)' exist"
+        $KeyList = Get-ChildItem -LiteralPath $Path
 
-    Get-ChildItem Env:* | ForEach-Object {
-        Write-RFLLog -Message "Env '$($_.Name)' is '$($_.Value -join (', '))'"
-    }
-
-    [Environment].GetMembers() | Where-Object {$_.MemberType -eq 'Property'} | ForEach-Object { 
-        Write-RFLLog -Message "Environment '$($_.Name)' is '$([environment]::"$($_.Name)" -join (', '))'"
-    }
-
-    $username = 'Agent.Smith'
-    $password = 'H3lpingU!!H3lpingU!!' | ConvertTo-SecureString -AsPlainText -Force
-    Write-RFLLog -Message "Checking Account '$($username)'"
-    $Account = Get-WmiObject -Class Win32_UserAccount -Filter "Name='$($username)'"
-    #Get-LocalUser -Name $username -ErrorAction SilentlyContinue
-
-    if ($Account) {
-        Write-RFLLog -Message "Account exist, configuring its settings"
-        Write-RFLLog -Message "Enabling account"
-        Enable-LocalUser -Name $username
-
-        Write-RFLLog -Message "Setting Password, AccountNeverExpires, and PasswordNeverExpires"
-        Set-LocalUser -Name $username -Password $password -AccountNeverExpires -PasswordNeverExpires $true
-
-        $group =[ADSI]"WinNT://./Administrators" 
-        $members = @($group.psbase.Invoke("Members")) 
-        if (-not ($members | foreach {$_.GetType().InvokeMember("Name", 'GetProperty', $null, $_, $null)} | Where-Object {$_ -eq $username})) {
-            Write-RFLLog -Message "Adding User to Local Administrator Group"
-            Add-LocalGroupMember -Group "Administrators" -Member "$($username)"
+        foreach($item in $KeyList) {
+            Write-RFLLog -Message "Removing '$($item.PSChildName)'"
+            Remove-Item -Path "Registry::$($item.Name)" -Recurse -Force
         }
-        Write-Host 'Account remediated'
-
     } else {
-        #account does not exist
-        Write-RFLLog -Message "Account does not exist. Creating it"
-        New-LocalUser "$($username)" -Password $Password -FullName "$($username)" -Description "$($username)" | Out-Null
-        Write-RFLLog -Message "Local user created"
-
-        Write-RFLLog -Message "User added to the local administrator group"
-        Add-LocalGroupMember -Group "Administrators" -Member "$($username)"
-
-        Write-RFLLog -Message "Setting AccountNeverExpires, and PasswordNeverExpires"
-        Set-LocalUser -Name $username -AccountNeverExpires -PasswordNeverExpires $true
-        Write-Host 'Account created'
+        Write-RFLLog -Message "Path '$($Path)' does not exist" -LogLevel 3
     }
+
+    Write-RFLLog -Message "Checking Schedule Task"
+    $Task = (Get-ScheduledTask -TaskName "Restart-Intune-Mgmt-Extension" -ErrorAction SilentlyContinue)
+    if (-not $Task) {
+        Write-RFLLog -Message "Creating Schedule Task"
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -RestartCount 3
+        $Time = New-ScheduledTaskTrigger -At ((Get-Date).AddMinutes(5)) -Once
+        $PS = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-NoProfile -NoLogo -NonInteractive -ExecutionPolicy Bypass -Command `"Get-Service -DisplayName 'Microsoft Intune Management Extension' | Restart-Service`""
+        Register-ScheduledTask -TaskName "Restart-Intune-Mgmt-Extension" -Trigger $Time -Action $PS -Settings $settings -User System | Out-Null
+    } else {
+        Write-RFLLog -Message "Update Existing Schedule Task"
+        $Time = New-ScheduledTaskTrigger -At ((Get-Date).AddMinutes(5)) -Once
+        Set-ScheduledTask -Trigger $Time -TaskName "Restart-Intune-Mgmt-Extension" | Out-Null
+        if ($task.State -eq 'Disabled') {
+            Write-RFLLog -Message "Enabling Disabled Schedule Task"
+            Enable-ScheduledTask -TaskName "Restart-Intune-Mgmt-Extension" | Out-Null
+        }
+    }
+    
+    #Write-RFLLog -Message "Restarting Microsoft Intune Management Extension Service"
+    #Get-Service -DisplayName "Microsoft Intune Management Extension" | Restart-Service 
+
+    #Write-RFLLog -Message "Request a computer restart within 5 minutes"
+    #shutdown /t 300 /r /c "Computer will restart in 5 minutes, please save any work now"
+    Write-Host "Schedule Task will run at $($Time.StartBoundary)"
 } catch {
     Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
-    Exit 3000
+    Write-Host "Unkwnon Error $($_)"
 } finally {
     Write-RFLLog -Message "*** Ending ***"
+    Exit 0
 }
 #endregion

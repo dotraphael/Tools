@@ -1,19 +1,19 @@
 <#
     .SYSNOPSIS
-        Remediate the Local Administrator User
+        Enable Wake on Lan Configuration on Windows Devices
 
     .DESCRIPTION
-        Create a local admin user
+        Enable Wake on Lan Configuration on Windows Devices
 
     .NOTES
-        Name: Remediate-LocalAdministrator
+        Name: Remediate-WakeOnLanConfiguration.ps1
         Author: Raphael Perez
         Email: raphael@perez.net.br
         Source: https://github.com/dotraphael/Tools/tree/master/Scripts
-        DateCreated: 02 July 2024 (v0.1)
+        DateCreated: 10 March 2025 (v0.1)
 
     .EXAMPLE
-        .\Remediate-LocalAdministrator.ps1
+        .\Remediate-WakeOnLanConfiguration.ps1
 #>
 #requires -version 5
 [CmdletBinding()]
@@ -179,7 +179,7 @@ function Get-ScriptDirectory {
 #region Variables
 $script:ScriptVersion = '0.1'
 $script:LogFilePath = $env:Temp
-$Script:LogFileFileName = 'Remediate-LocalAdministrator.log'
+$Script:LogFileFileName = 'Remediate-WakeOnLanConfiguration.log'
 $script:ScriptLogFilePath = "$($script:LogFilePath)\$($Script:LogFileFileName)"
 #endregion
 
@@ -197,52 +197,36 @@ try {
         Write-RFLLog -Message "Parameter '$($_)' is '$($PSCmdlet.MyInvocation.BoundParameters.Item($_))'"
     }
 
-    $PSVersionTable.Keys | ForEach-Object { 
-        Write-RFLLog -Message "PSVersionTable '$($_)' is '$($PSVersionTable.Item($_) -join (', '))'"
-    }
+    $List = Get-NetAdapterPowerManagement -IncludeHidden -ErrorAction SilentlyContinue | Where-Object {($_.InterfaceDescription -notlike 'Bluetooth*') -and ($_.InterfaceDescription -notlike 'Fortinet*') -and ($_.InterfaceDescription -notlike 'Microsoft Wi-Fi Direct Virtual Adapter*') -and ($_.Name -notlike 'Teredo*') -and ($_.Name -ne '6to4 Adapter') -and ($_.Name -notlike 'Microsoft IP-HTTPS*')} 
+    $Supported = ($List | Where-Object {$_.WakeOnMagicPacket -ne 'Unsupported'})
+    $NotEnabled = ($Supported | Where-Object {$_.WakeOnMagicPacket -ne 'Enabled'})
 
-    Get-ChildItem Env:* | ForEach-Object {
-        Write-RFLLog -Message "Env '$($_.Name)' is '$($_.Value -join (', '))'"
-    }
-
-    [Environment].GetMembers() | Where-Object {$_.MemberType -eq 'Property'} | ForEach-Object { 
-        Write-RFLLog -Message "Environment '$($_.Name)' is '$([environment]::"$($_.Name)" -join (', '))'"
-    }
-
-    $username = 'Agent.Smith'
-    $password = 'H3lpingU!!H3lpingU!!' | ConvertTo-SecureString -AsPlainText -Force
-    Write-RFLLog -Message "Checking Account '$($username)'"
-    $Account = Get-WmiObject -Class Win32_UserAccount -Filter "Name='$($username)'"
-    #Get-LocalUser -Name $username -ErrorAction SilentlyContinue
-
-    if ($Account) {
-        Write-RFLLog -Message "Account exist, configuring its settings"
-        Write-RFLLog -Message "Enabling account"
-        Enable-LocalUser -Name $username
-
-        Write-RFLLog -Message "Setting Password, AccountNeverExpires, and PasswordNeverExpires"
-        Set-LocalUser -Name $username -Password $password -AccountNeverExpires -PasswordNeverExpires $true
-
-        $group =[ADSI]"WinNT://./Administrators" 
-        $members = @($group.psbase.Invoke("Members")) 
-        if (-not ($members | foreach {$_.GetType().InvokeMember("Name", 'GetProperty', $null, $_, $null)} | Where-Object {$_ -eq $username})) {
-            Write-RFLLog -Message "Adding User to Local Administrator Group"
-            Add-LocalGroupMember -Group "Administrators" -Member "$($username)"
+    if ($Supported) {
+        if (-not $NotEnabled) {
+            Write-RFLLog -Message "All Supported Network Adapter have Wake on Lan Enabled" 
+            exit 0
         }
-        Write-Host 'Account remediated'
-
     } else {
-        #account does not exist
-        Write-RFLLog -Message "Account does not exist. Creating it"
-        New-LocalUser "$($username)" -Password $Password -FullName "$($username)" -Description "$($username)" | Out-Null
-        Write-RFLLog -Message "Local user created"
+        if ($List) {
+            Write-RFLLog -Message "No Network Adapter Supporting Wake On Lan: $($List | select InterfaceDescription, Name, WakeOnMagicPacket, WakeOnPattern | ConvertTo-Json -Compress)" 
+            exit 0
+        } else {
+            Write-RFLLog -Message "No Network Adapter Supporting Wake On Lan" 
+            exit 0
+        }
+    }
 
-        Write-RFLLog -Message "User added to the local administrator group"
-        Add-LocalGroupMember -Group "Administrators" -Member "$($username)"
-
-        Write-RFLLog -Message "Setting AccountNeverExpires, and PasswordNeverExpires"
-        Set-LocalUser -Name $username -AccountNeverExpires -PasswordNeverExpires $true
-        Write-Host 'Account created'
+    if ($NotEnabled) {
+        Write-RFLLog -Message "Found Supported Network Adapter Supporting Not Enabled: $($NotEnabled | select InterfaceDescription, Name, WakeOnMagicPacket, WakeOnPattern | ConvertTo-Json -Compress)" 
+        foreach($item in $NotEnabled) {
+            Write-RFLLog -Message "Enabling Wake On Lan for $($item.InterfaceDescription) - $($item.Name)" 
+            try {
+                $item | Enable-NetAdapterPowerManagement | Out-Null
+                Write-RFLLog -Message "    Wake On Lan Enabled for for $($item.InterfaceDescription) - $($item.Name)" 
+            } catch {
+                Write-RFLLog -Message "    Unable to Enable Wake On Lan. Error: $($_)" -LogLevel 3
+            }
+        }
     }
 } catch {
     Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3

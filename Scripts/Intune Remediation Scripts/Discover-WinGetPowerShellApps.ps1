@@ -1,19 +1,21 @@
 <#
     .SYSNOPSIS
-        Remediate the Local Administrator User
+        Discover the Apps available to be updated WinGet
 
     .DESCRIPTION
-        Create a local admin user
+        Discover the Apps available to be updated WinGet
+        Based on https://github.com/yannara/Intune/blob/main/Device-Winget_upgrade_all_apps_public.ps1
+                 https://gist.github.com/sba923/7924b726fd44af91d18453ee595e6548
 
     .NOTES
-        Name: Remediate-LocalAdministrator
+        Name: Discover-WinGetPowerShellApps.ps1
         Author: Raphael Perez
         Email: raphael@perez.net.br
         Source: https://github.com/dotraphael/Tools/tree/master/Scripts
-        DateCreated: 02 July 2024 (v0.1)
+        DateCreated: 29 November 2024 (v0.1)
 
     .EXAMPLE
-        .\Remediate-LocalAdministrator.ps1
+        .\Discover-WinGetPowerShellApps.ps1
 #>
 #requires -version 5
 [CmdletBinding()]
@@ -179,13 +181,18 @@ function Get-ScriptDirectory {
 #region Variables
 $script:ScriptVersion = '0.1'
 $script:LogFilePath = $env:Temp
-$Script:LogFileFileName = 'Remediate-LocalAdministrator.log'
+$Script:LogFileFileName = 'Discover-WinGetPowerShellApps.log'
 $script:ScriptLogFilePath = "$($script:LogFilePath)\$($Script:LogFileFileName)"
+
+#Applications to Ignore as they cannot be updated or updates are managed via Intune
+$script:IgnoreAppIDs = @() # @('Microsoft.Office', 'Microsoft.Edge')
+
+#winget source list
+
 #endregion
 
 #region Main
 try {
-    #
     Set-RFLLogPath
     Clear-RFLLog 25mb
 
@@ -197,56 +204,88 @@ try {
         Write-RFLLog -Message "Parameter '$($_)' is '$($PSCmdlet.MyInvocation.BoundParameters.Item($_))'"
     }
 
-    $PSVersionTable.Keys | ForEach-Object { 
-        Write-RFLLog -Message "PSVersionTable '$($_)' is '$($PSVersionTable.Item($_) -join (', '))'"
-    }
-
-    Get-ChildItem Env:* | ForEach-Object {
-        Write-RFLLog -Message "Env '$($_.Name)' is '$($_.Value -join (', '))'"
-    }
-
-    [Environment].GetMembers() | Where-Object {$_.MemberType -eq 'Property'} | ForEach-Object { 
-        Write-RFLLog -Message "Environment '$($_.Name)' is '$([environment]::"$($_.Name)" -join (', '))'"
-    }
-
-    $username = 'Agent.Smith'
-    $password = 'H3lpingU!!H3lpingU!!' | ConvertTo-SecureString -AsPlainText -Force
-    Write-RFLLog -Message "Checking Account '$($username)'"
-    $Account = Get-WmiObject -Class Win32_UserAccount -Filter "Name='$($username)'"
-    #Get-LocalUser -Name $username -ErrorAction SilentlyContinue
-
-    if ($Account) {
-        Write-RFLLog -Message "Account exist, configuring its settings"
-        Write-RFLLog -Message "Enabling account"
-        Enable-LocalUser -Name $username
-
-        Write-RFLLog -Message "Setting Password, AccountNeverExpires, and PasswordNeverExpires"
-        Set-LocalUser -Name $username -Password $password -AccountNeverExpires -PasswordNeverExpires $true
-
-        $group =[ADSI]"WinNT://./Administrators" 
-        $members = @($group.psbase.Invoke("Members")) 
-        if (-not ($members | foreach {$_.GetType().InvokeMember("Name", 'GetProperty', $null, $_, $null)} | Where-Object {$_ -eq $username})) {
-            Write-RFLLog -Message "Adding User to Local Administrator Group"
-            Add-LocalGroupMember -Group "Administrators" -Member "$($username)"
-        }
-        Write-Host 'Account remediated'
-
+    #Select newest winget.exe file based on folder order and set it as winget variable 
+    Write-RFLLog -Message "Getting WinGet Path"
+    $winget = Get-ChildItem -Path 'C:\Program Files\WindowsApps\' -Filter winget.exe -recurse | Sort-Object -Property 'FullName' -Descending | Select-Object -First 1 -ExpandProperty FullName | Tee-Object -FilePath C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\winget_upgrade_all_apps_recurrent_file-found-from.log
+    if ($winget) {
+        Write-RFLLog -Message "WingGet path is now '$($winget)'"
     } else {
-        #account does not exist
-        Write-RFLLog -Message "Account does not exist. Creating it"
-        New-LocalUser "$($username)" -Password $Password -FullName "$($username)" -Description "$($username)" | Out-Null
-        Write-RFLLog -Message "Local user created"
+        thrown 'Unable to detect WinGet path'
+    }
 
-        Write-RFLLog -Message "User added to the local administrator group"
-        Add-LocalGroupMember -Group "Administrators" -Member "$($username)"
+    Write-RFLLog -Message "Getting Updated List"
+    $stdout = & $winget upgrade --accept-source-agreements
+    Write-RFLLog -Message "Output: $stdout"
 
-        Write-RFLLog -Message "Setting AccountNeverExpires, and PasswordNeverExpires"
-        Set-LocalUser -Name $username -AccountNeverExpires -PasswordNeverExpires $true
-        Write-Host 'Account created'
+    Write-RFLLog -Message "Getting Header"
+    #$header = $stdOut[10]
+    $i = 0
+    foreach($item in $stdOut) {
+        if ($item -match '^Name\s+Id\s+Version\s+Available\s+Source') {
+            $header = $item
+            break
+        }
+        $i++
+    }
+    Write-RFLLog -Message "Header set to $($header)"
+
+    $fieldnames = @()
+    $fieldoffsets = @()
+    $offset = 0
+    $line = $header
+    $re = ""
+
+    while ($line -ne '') {
+        if ($line -match '^(\S+)(\s+)(.*)') {
+            $fieldnames += $Matches[1]
+            $fieldoffsets += $offset
+            $offset += $Matches[1].Length + $Matches[2].Length
+            $line = $Matches[3]
+        } else {
+            $fieldnames += $line
+            $fieldoffsets += $offset
+            $line = ''
+        }
+    }
+    Write-RFLLog -Message "Fields found: $($fieldnames)"
+
+    $re = '^'
+    for ($fieldindex = 0; $fieldindex -lt ($fieldnames.Count - 1); $fieldindex++) {
+        $re += ('(.{{{0},{0}}})' -f ($fieldoffsets[$fieldindex + 1] - $fieldoffsets[$fieldindex]))
+    }
+    $re += '(.*)'
+    Write-RFLLog -Message "RE set to : $($re)"
+
+    $UpdateList = @()
+    $data = $stdout | Select-Object -Skip ($i+2)
+    foreach($line in $data) {
+        $line = $line -replace '[^-a-zA-Z0-9._]', ' '  # Replace other potential special character. but leave number, . _ and -
+
+        if ($line -match $re) {
+            $obj = New-Object -TypeName PSObject
+            for ($fieldindex = 0; $fieldindex -le ($fieldnames.Count - 1); $fieldindex++) { 
+                $value = ($Matches[$fieldindex + 1] -replace '\s+$', '')
+                Add-Member -InputObject $obj -MemberType NoteProperty -Name $fieldnames[$fieldindex] -Value $value.Trim()
+            }
+            $UpdateList += $obj
+        }
+    }
+    Write-RFLLog -Message "Update list: $($UpdateList | ConvertTo-Json -Compress)"
+
+    $ManagedUpdateList = @()
+    $ManagedUpdateList += $UpdateList | Where-Object {$_.Id -notin $script:IgnoreAppIDs} | ForEach-Object {
+        $_
+    }
+    Write-RFLLog -Message "Managed Update list: $($ManagedUpdateList | ConvertTo-Json -Compress)"
+    $ManagedUpdateList | ConvertTo-Json -Compress 
+    if ($ManagedUpdateList.Count -gt 0) {
+        Exit 1
+    } else {
+        Exit 0
     }
 } catch {
     Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
-    Exit 3000
+    thrown $_
 } finally {
     Write-RFLLog -Message "*** Ending ***"
 }

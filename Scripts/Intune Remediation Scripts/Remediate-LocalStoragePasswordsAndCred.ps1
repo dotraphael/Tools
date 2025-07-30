@@ -1,19 +1,22 @@
 <#
     .SYSNOPSIS
-        Remediate the Local Administrator User
+        Remediate the usage of the local storage of passwords and credentials
 
     .DESCRIPTION
-        Create a local admin user
+        Remediate the usage of the local storage of passwords and credentials
+        Based on 
+            https://gobisweb.ch/2022/10/07/security-how-to-achieve-a-microsoft-secure-score-for-devices-above-95-in-microsoft-defender-for-endpoint-with-microsoft-intune/
+            https://github.com/microsoft/Intune-ACSC-Windows-Hardening-Guidelines/blob/main/scripts/DisableDomainCreds.ps1
 
     .NOTES
-        Name: Remediate-LocalAdministrator
+        Name: Remediate-LocalStoragePasswordsAndCred.ps1
         Author: Raphael Perez
         Email: raphael@perez.net.br
         Source: https://github.com/dotraphael/Tools/tree/master/Scripts
-        DateCreated: 02 July 2024 (v0.1)
+        DateCreated: 28 May 2025 (v0.1)
 
     .EXAMPLE
-        .\Remediate-LocalAdministrator.ps1
+        .\Remediate-LocalStoragePasswordsAndCred.ps1
 #>
 #requires -version 5
 [CmdletBinding()]
@@ -179,7 +182,7 @@ function Get-ScriptDirectory {
 #region Variables
 $script:ScriptVersion = '0.1'
 $script:LogFilePath = $env:Temp
-$Script:LogFileFileName = 'Remediate-LocalAdministrator.log'
+$Script:LogFileFileName = 'Remediate-LocalStoragePasswordsAndCred.ps1'
 $script:ScriptLogFilePath = "$($script:LogFilePath)\$($Script:LogFileFileName)"
 #endregion
 
@@ -197,52 +200,47 @@ try {
         Write-RFLLog -Message "Parameter '$($_)' is '$($PSCmdlet.MyInvocation.BoundParameters.Item($_))'"
     }
 
-    $PSVersionTable.Keys | ForEach-Object { 
-        Write-RFLLog -Message "PSVersionTable '$($_)' is '$($PSVersionTable.Item($_) -join (', '))'"
-    }
+    $Hive = 'HKLM'
+    $Key = 'SYSTEM\CurrentControlSet\Control\Lsa'
+    $PropertyName = 'DisableDomainCreds'
+    $CorrectValue = 1
+    $PropertyType = 'DWord'
 
-    Get-ChildItem Env:* | ForEach-Object {
-        Write-RFLLog -Message "Env '$($_.Name)' is '$($_.Value -join (', '))'"
-    }
+    $HKLMregistryPath = "$($Hive):\$($Key)"
+    $CheckValue = $false
 
-    [Environment].GetMembers() | Where-Object {$_.MemberType -eq 'Property'} | ForEach-Object { 
-        Write-RFLLog -Message "Environment '$($_.Name)' is '$([environment]::"$($_.Name)" -join (', '))'"
-    }
 
-    $username = 'Agent.Smith'
-    $password = 'H3lpingU!!H3lpingU!!' | ConvertTo-SecureString -AsPlainText -Force
-    Write-RFLLog -Message "Checking Account '$($username)'"
-    $Account = Get-WmiObject -Class Win32_UserAccount -Filter "Name='$($username)'"
-    #Get-LocalUser -Name $username -ErrorAction SilentlyContinue
-
-    if ($Account) {
-        Write-RFLLog -Message "Account exist, configuring its settings"
-        Write-RFLLog -Message "Enabling account"
-        Enable-LocalUser -Name $username
-
-        Write-RFLLog -Message "Setting Password, AccountNeverExpires, and PasswordNeverExpires"
-        Set-LocalUser -Name $username -Password $password -AccountNeverExpires -PasswordNeverExpires $true
-
-        $group =[ADSI]"WinNT://./Administrators" 
-        $members = @($group.psbase.Invoke("Members")) 
-        if (-not ($members | foreach {$_.GetType().InvokeMember("Name", 'GetProperty', $null, $_, $null)} | Where-Object {$_ -eq $username})) {
-            Write-RFLLog -Message "Adding User to Local Administrator Group"
-            Add-LocalGroupMember -Group "Administrators" -Member "$($username)"
-        }
-        Write-Host 'Account remediated'
-
+    Write-RFLLog -Message "Checking Registry"
+    if (Test-Path $HKLMregistryPath) {
+        Write-RFLLog -Message "Registry key $($HKLMregistryPath) exist, ignoring its creation"
     } else {
-        #account does not exist
-        Write-RFLLog -Message "Account does not exist. Creating it"
-        New-LocalUser "$($username)" -Password $Password -FullName "$($username)" -Description "$($username)" | Out-Null
-        Write-RFLLog -Message "Local user created"
+        Write-RFLLog -Message "Creating registry key $($HKLMregistryPath)"
+        New-Item -Path $HKLMregistryPath -Force | Out-Null
+    }
 
-        Write-RFLLog -Message "User added to the local administrator group"
-        Add-LocalGroupMember -Group "Administrators" -Member "$($username)"
+    $RegistryKey = Get-Item -LiteralPath $HKLMregistryPath
+    $keyValue = $RegistryKey.GetValue($PropertyName, $null)
+    if ($null -eq $keyValue) {
+        Write-RFLLog -Message "Value $($HKLMregistryPath)\$($PropertyName) does not exist. Creating it" -LogLevel 2
+        New-ItemProperty -Path $HKLMregistryPath -Name $PropertyName -Value $CorrectValue -PropertyType $PropertyType -Force | Out-Null
+        $CheckValue = $true
+    } else {
+        Write-RFLLog -Message "Property Value is [$($keyValue)]."
+        if ($keyValue -ne $CorrectValue) { 
+            Write-RFLLog -Message "New Property Value [$CorrectValue]"
+            Set-ItemProperty -Path $HKLMregistryPath -Name $PropertyName -Value $CorrectValue -Force
+            $CheckValue = $true
+        }
+    }
 
-        Write-RFLLog -Message "Setting AccountNeverExpires, and PasswordNeverExpires"
-        Set-LocalUser -Name $username -AccountNeverExpires -PasswordNeverExpires $true
-        Write-Host 'Account created'
+    if ($CheckValue) {
+        $keyValue = $RegistryKey.GetValue($PropertyName, $null)
+        Write-RFLLog -Message "New value set to [$($keyValue)]"
+        if ($CorrectValue -eq $keyValue) {
+            Write-RFLLog -Message "Value created/updated successfully."
+        } else {
+            Write-RFLLog -Message "Value created/updated was not successful. Check computer." -LogLevel 3
+        }
     }
 } catch {
     Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3

@@ -1,19 +1,20 @@
 <#
     .SYSNOPSIS
-        Remediate the Local Administrator User
+        Remediate the num lock is enable at start up for the default user
 
     .DESCRIPTION
-        Create a local admin user
+        Remediate the num lock is enable at start up for the default user
+        Based on https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-2000-server/cc978657(v=technet.10)?redirectedfrom=MSDN
 
     .NOTES
-        Name: Remediate-LocalAdministrator
+        Name: Remediate-OldProfile.ps1
         Author: Raphael Perez
         Email: raphael@perez.net.br
         Source: https://github.com/dotraphael/Tools/tree/master/Scripts
-        DateCreated: 02 July 2024 (v0.1)
+        DateCreated: 18 February 2025 (v0.1)
 
     .EXAMPLE
-        .\Remediate-LocalAdministrator.ps1
+        .\Remediate-OldProfile.ps1
 #>
 #requires -version 5
 [CmdletBinding()]
@@ -179,7 +180,7 @@ function Get-ScriptDirectory {
 #region Variables
 $script:ScriptVersion = '0.1'
 $script:LogFilePath = $env:Temp
-$Script:LogFileFileName = 'Remediate-LocalAdministrator.log'
+$Script:LogFileFileName = 'Remediate-Numlock.log'
 $script:ScriptLogFilePath = "$($script:LogFilePath)\$($Script:LogFileFileName)"
 #endregion
 
@@ -197,52 +198,80 @@ try {
         Write-RFLLog -Message "Parameter '$($_)' is '$($PSCmdlet.MyInvocation.BoundParameters.Item($_))'"
     }
 
-    $PSVersionTable.Keys | ForEach-Object { 
-        Write-RFLLog -Message "PSVersionTable '$($_)' is '$($PSVersionTable.Item($_) -join (', '))'"
-    }
+    $days = 90
+    $win32_profiles = get-CimInstance win32_userprofile | Where-Object {$_.LocalPath -notlike 'C:\WINDOWS\*'} | select *
+    $dir_profiles = Get-ChildItem c:\Users\*\ntuser.dat -Attributes Hidden,Archive | select *
 
-    Get-ChildItem Env:* | ForEach-Object {
-        Write-RFLLog -Message "Env '$($_.Name)' is '$($_.Value -join (', '))'"
-    }
-
-    [Environment].GetMembers() | Where-Object {$_.MemberType -eq 'Property'} | ForEach-Object { 
-        Write-RFLLog -Message "Environment '$($_.Name)' is '$([environment]::"$($_.Name)" -join (', '))'"
-    }
-
-    $username = 'Agent.Smith'
-    $password = 'H3lpingU!!H3lpingU!!' | ConvertTo-SecureString -AsPlainText -Force
-    Write-RFLLog -Message "Checking Account '$($username)'"
-    $Account = Get-WmiObject -Class Win32_UserAccount -Filter "Name='$($username)'"
-    #Get-LocalUser -Name $username -ErrorAction SilentlyContinue
-
-    if ($Account) {
-        Write-RFLLog -Message "Account exist, configuring its settings"
-        Write-RFLLog -Message "Enabling account"
-        Enable-LocalUser -Name $username
-
-        Write-RFLLog -Message "Setting Password, AccountNeverExpires, and PasswordNeverExpires"
-        Set-LocalUser -Name $username -Password $password -AccountNeverExpires -PasswordNeverExpires $true
-
-        $group =[ADSI]"WinNT://./Administrators" 
-        $members = @($group.psbase.Invoke("Members")) 
-        if (-not ($members | foreach {$_.GetType().InvokeMember("Name", 'GetProperty', $null, $_, $null)} | Where-Object {$_ -eq $username})) {
-            Write-RFLLog -Message "Adding User to Local Administrator Group"
-            Add-LocalGroupMember -Group "Administrators" -Member "$($username)"
+    $path = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+    $reg_profiles = @()
+    foreach ($p in (Get-ChildItem $path)) {
+        try {
+            $objUser = (New-Object System.Security.Principal.SecurityIdentifier($p.PSChildName)).Translate([System.Security.Principal.NTAccount]).value
+        } catch {
+            $objUser = "[UNKNOWN]"
         }
-        Write-Host 'Account remediated'
+        if ($objUser -match 'NT AUTHORITY') { continue }
+        Remove-Variable -Force LTH,LTL,UTH,UTL -ErrorAction SilentlyContinue
+        $LTH = '{0:X8}' -f (Get-ItemProperty -Path $p.PSPath -Name LocalProfileLoadTimeHigh -ErrorAction SilentlyContinue).LocalProfileLoadTimeHigh
+        $LTL = '{0:X8}' -f (Get-ItemProperty -Path $p.PSPath -Name LocalProfileLoadTimeLow -ErrorAction SilentlyContinue).LocalProfileLoadTimeLow
+        $UTH = '{0:X8}' -f (Get-ItemProperty -Path $p.PSPath -Name LocalProfileUnloadTimeHigh -ErrorAction SilentlyContinue).LocalProfileUnloadTimeHigh
+        $UTL = '{0:X8}' -f (Get-ItemProperty -Path $p.PSPath -Name LocalProfileUnloadTimeLow -ErrorAction SilentlyContinue).LocalProfileUnloadTimeLow
+        $LoadTime = if ($LTH -and $LTL) {
+            [datetime]::FromFileTime("0x$LTH$LTL")
+        } else {
+            $null
+        }
+        $UnloadTime = if ($UTH -and $UTL) {
+            [datetime]::FromFileTime("0x$UTH$UTL")
+        } else {
+            $null
+        }
+        $reg_profiles += [pscustomobject][ordered]@{
+            User = $objUser
+            SID = $p.PSChildName
+            Loadtime = $LoadTime
+            UnloadTime = $UnloadTime
+        }
+    }
 
-    } else {
-        #account does not exist
-        Write-RFLLog -Message "Account does not exist. Creating it"
-        New-LocalUser "$($username)" -Password $Password -FullName "$($username)" -Description "$($username)" | Out-Null
-        Write-RFLLog -Message "Local user created"
+    $profileList = @()
+    foreach($item in $win32_profiles) {
+        $dirProf = ($dir_profiles | Where-Object {$_.DirectoryName -eq $item.LocalPath})
+        $regProf = ($reg_profiles | Where-Object {$_.SID -eq $item.SID})
 
-        Write-RFLLog -Message "User added to the local administrator group"
-        Add-LocalGroupMember -Group "Administrators" -Member "$($username)"
+        $objTemp = New-Object PSObject -Property @{
+            #win32_profile = $item
+            #dir_Profile = $dirProf
+            #reg_Prof = $regProf
+            UserName = $regProf.User
+            UserSID = $item.SID
+            LocalPath = $item.LocalPath
+            Loaded = $item.Loaded
+            LastWriteTime = $null
+            Size = "{0:N2}" -f ((Get-ChildItem –force $item.LocalPath –Recurse -ErrorAction SilentlyContinue| measure Length -sum).sum / 1Gb) 
+        }
 
-        Write-RFLLog -Message "Setting AccountNeverExpires, and PasswordNeverExpires"
-        Set-LocalUser -Name $username -AccountNeverExpires -PasswordNeverExpires $true
-        Write-Host 'Account created'
+        if ($regProf.Loadtime) {
+            $objTemp.LastWriteTime = [datetime]($regProf.Loadtime)
+        } elseif ($dirProf.LastWriteTime) {
+            $objTemp.LastWriteTime = [datetime]($dirProf.LastWriteTime)
+        } else {
+            $objTemp.LastWriteTime = [datetime]($item.LastUseTime)
+        }
+        $profileList += $objTemp
+    }
+
+    $delete_list = $profileList | Where-Object {($_.UserName -eq '[UNKNOWN]') -or ($_.LastWriteTime -lt $(Get-Date).Date.AddDays(-$days))}
+    $delete_list = $delete_list | Where-Object {$_.Loaded -eq $false}
+
+    if ($delete_list.count -eq 0) {
+        Write-RFLLog -Message "No old profiles to remove"
+        Exit 0
+    }
+
+    foreach($item in $delete_list) {
+        Write-RFLLog -Message "Deleting $($item.UserName) - $($item.UserSID) - Folder $($item.LocalPath). Saving up to $($item.Size)GB"
+        Get-WMIObject -class Win32_UserProfile -Filter "SID = '$($item.UserSID)'" | ForEach-Object { Remove-WmiObject -Path $_.__PATH }
     }
 } catch {
     Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
