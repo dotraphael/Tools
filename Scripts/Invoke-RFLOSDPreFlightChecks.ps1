@@ -1,6 +1,6 @@
 <#
     .SYSNOPSIS
-        Run in SCCM Task Sequence as Pre-Flight Check
+        Run in SCCM/MDT Task Sequence as Pre-Flight Check
 
     .DESCRIPTION
          Check for the most common issues at the very beginning of the task sequence
@@ -8,8 +8,8 @@
     .PARAMETER SupportedModel
         Array of supported models
 
-    .PARAMETER SCCMServers
-        SCCM Servers that must be able to connect
+    .PARAMETER Servers
+        Servers that must be able to connect
 
     .PARAMETER MinRAMMemory
         Minimum RAM Memory
@@ -23,6 +23,15 @@
     .PARAMETER RequireUEFI
         Require EUFI to be enabled
 
+    .PARAMETER RequirePower
+        Require AC connection. If not connected generate error. If not RequirePower, AC will generate warning
+
+    .PARAMETER MinBatteryLevel
+        Minimum battery level charge if Laptop
+
+    .PARAMETER RequireNetwork
+        Require Network connection. If not connected to the network, generate error.
+
     .PARAMETER AutoCloseInterval
         If all checks passed, how long (seconds) the form will still be open
 
@@ -32,11 +41,22 @@
         DateCreated: April 2020 (v0.1)
         Update: 21 April 2021 (v0.2)
             #Added check for UEFI only when Required
+        Update: 12 May 2021 (v0.3)
+            #Updated filters for objwmi as it was failing on Surface laptop 2
+            #Added variable to require power. if enabled and AC not connected, error otherwise warning
+            #autoclose does not start only if there are errors.
+        Update: 20 December 2023 (v0.4)
+            #Added Parameter to block if network is not connected (RequireNetwork)
+            #Added Parameter MinBatteryLevel to set the minimum battery level on a laptop
+            #Fixed usage of RequirePower so only show errors for battery if required power is enabled
+            #Fixed usage of Battery information so only show errrors for battery/power if the WMI for battery is available
+            #added try..except when checking Win32_Bios as it fail on some Surface devices
 
     .EXAMPLE
-        .\Invoke-RFLOSDPreFlightChecks.ps1 -SupportedModel @('Surface Pro 7', 'Surface Pro 4') -SCCMServers @('192.168.0.5') 
-        .\Invoke-RFLOSDPreFlightChecks.ps1 -MinRAMMemory 4 -SupportedModel @('Surface Pro 7', 'Surface Pro 3', 'Virtual Machine') -SCCMServers @('192.168.0.5') -AutoCloseInterval 20
-        .\Invoke-RFLOSDPreFlightChecks.ps1 -MinRAMMemory 4 -SupportedModel @('Surface Pro 7', 'Surface Pro 3', 'Virtual Machine') -SCCMServers @('192.168.0.5') -RequireTPM -RequireUEFI -AutoCloseInterval 20
+        .\Invoke-RFLOSDPreFlightChecks.ps1 -SupportedModel @('Surface Pro 7', 'Surface Pro 4') -Servers @('192.168.0.5') 
+        .\Invoke-RFLOSDPreFlightChecks.ps1 -MinRAMMemory 4 -SupportedModel @('Surface Pro 7', 'Surface Pro 3', 'Virtual Machine') -Servers @('192.168.0.5') -AutoCloseInterval 20
+        .\Invoke-RFLOSDPreFlightChecks.ps1 -MinRAMMemory 4 -SupportedModel @('Surface Pro 7', 'Surface Pro 3', 'Virtual Machine') -Servers @('192.168.0.5') -RequireTPM -RequireUEFI -AutoCloseInterval 20
+        .\Invoke-RFLOSDPreFlightChecks.ps1 -MinRAMMemory 4 -SupportedModel @('Surface Pro 7', 'Surface Pro 3', 'Virtual Machine') -Servers @('192.168.0.5') -RequireTPM -TpmVersion '1.3' -RequireUEFI -RequirePower -RequireNetwork
 #>
 #requires -version 5
 [CmdletBinding()]
@@ -47,7 +67,7 @@ param (
 
     [Parameter(Mandatory = $True)]
     [string[]]
-    $SCCMServers,
+    $Servers,
 
     [Parameter(Mandatory = $false)]
     [int]
@@ -67,10 +87,20 @@ param (
     
     [Parameter(Mandatory = $False)]
     [int]
-    $AutoCloseInterval = 60
-)
+    $AutoCloseInterval = 60,
 
-$StartUpVariables = Get-Variable
+    [Parameter(Mandatory = $false)]
+    [switch]
+    $RequirePower,
+
+    [Parameter(Mandatory = $false)]
+    [int]
+    $MinBatteryLevel = 60,
+    
+    [Parameter(Mandatory = $false)]
+    [switch]
+    $RequireNetwork
+)
 
 #region Functions
 #region Test-RFLAdministrator
@@ -314,10 +344,17 @@ function Get-RFLComputerInformation {
     $Script:InfoVars.Add('ComputerSystem.TotalPhysicalMemory', $objWMI.TotalPhysicalMemory)
 
     Write-RFLLog -Message "BIOS"
-    $objWMI = (Get-CimInstance -ClassName Win32_Bios)
-    $Script:InfoVars.Add('BIOS.SMBIOSBIOSVersion', $objWMI.SMBIOSBIOSVersion)
-    $Script:InfoVars.Add('BIOS.ReleaseDate', $objWMI.ReleaseDate)
-    $Script:InfoVars.Add('BIOS.SerialNumber', $objWMI.SerialNumber)
+    try {
+        $objWMI = (Get-CimInstance -ClassName Win32_Bios)
+        $Script:InfoVars.Add('BIOS.SMBIOSBIOSVersion', $objWMI.SMBIOSBIOSVersion)
+        $Script:InfoVars.Add('BIOS.ReleaseDate', $objWMI.ReleaseDate)
+        $Script:InfoVars.Add('BIOS.SerialNumber', $objWMI.SerialNumber)
+    } catch {
+        Write-RFLLog -Message "Error checking Win32_BIOS, Assuming $null" -LogLevel 3
+        $Script:InfoVars.Add('BIOS.SMBIOSBIOSVersion', $null)
+        $Script:InfoVars.Add('BIOS.ReleaseDate', $null)
+        $Script:InfoVars.Add('BIOS.SerialNumber', $null)
+    }
 
     Write-RFLLog -Message "CPU"
     $objWMI = (Get-WmiObject -Class Win32_Processor)
@@ -346,9 +383,13 @@ function Get-RFLComputerInformation {
 
     Write-RFLLog -Message "Disk Controller"
     $objWMI = (Get-WmiObject -Class Win32_IDEController -Filter 'DeviceID like "PCI\\VEN%"')
-    if ($null -eq $objWMI) {
+    if (-not $objWMI) {
         $objWMI = (Get-WmiObject -Class Win32_SCSIController -Filter 'DeviceID like "PCI\\VEN%"')
     }
+    if (-not $objWMI) {
+        Write-RFLLog -Message "null object" -LogLevel 2
+    }
+
     $iCount = 0
     $objWMI | ForEach-Object {
         $objItem = $_
@@ -359,23 +400,29 @@ function Get-RFLComputerInformation {
 
     Write-RFLLog -Message "Battery"
     $objWMI = (Get-WmiObject -Class Win32_Battery)
-    if ($null -ne $objWMI) {
+    if ($objWMI) {
         $Script:InfoVars.Add("Battery.Batterystatus", $objWMI.Batterystatus)
         $Script:InfoVars.Add("Battery.EstimatedChargeRemaining", $objWMI.EstimatedChargeRemaining)
+        $Script:InfoVars.Add("Battery.WMI", $true)
     } else {
+        Write-RFLLog -Message "null object" -LogLevel 2
         $Script:InfoVars.Add("Battery.Batterystatus", 0)
         $Script:InfoVars.Add("Battery.EstimatedChargeRemaining", 0)
+        $Script:InfoVars.Add("Battery.WMI", $false)
     }    
 
     $objWMI = (Get-WmiObject -Namespace root\wmi -Class BatteryStatus -ErrorAction SilentlyContinue)
-    if ($null -eq $objWMI) {
+    if (-not $objWMI) {
+        Write-RFLLog -Message "null object" -LogLevel 2
         $Script:InfoVars.Add("BatteryStatus.PowerOnline", $false)
         $Script:InfoVars.Add("BatteryStatus.Charging", $false)
         $Script:InfoVars.Add("BatteryStatus.Critical", $false)
+        $Script:InfoVars.Add("BatteryStatus.WMI", $false)
     } else {
         $Script:InfoVars.Add("BatteryStatus.PowerOnline", $objWMI.PowerOnline)
         $Script:InfoVars.Add("BatteryStatus.Charging", $objWMI.Charging)
         $Script:InfoVars.Add("BatteryStatus.Critical", $objWMI.Critical)
+        $Script:InfoVars.Add("BatteryStatus.WMI", $true)
     }    
 
     Write-RFLLog -Message "Network"
@@ -387,7 +434,7 @@ function Get-RFLComputerInformation {
             Write-RFLLog -Message "Ignoring $($objItem.Name)"
         } else {
             $objwmiIPConfig = (Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter "IPEnabled = 'True' and Index = $($objItem.Index)")
-            if ($null -ne $objwmiIPConfig) {
+            if ($objwmiIPConfig) {
                 $Script:InfoVars.Add("IPAddress.IPAddress_$($objItem.Index)", $objwmiIPConfig.IPAddress -join ',')
                 $bConnected = $true
             }
@@ -404,16 +451,17 @@ function Get-RFLComputerInformation {
 
     Write-RFLLog -Message "TPM"
     $objWMI = Get-WmiObject -Namespace 'root\cimv2\security\microsofttpm' -Class 'win32_tpm' 
-    if ($null -eq $objWMI) {
-        $Script:InfoVars.Add("TPM.Found", "False")
-        $Script:InfoVars.Add("TPM.Enabled", "False")
-        $Script:InfoVars.Add("TPM.Activated", "False")
-        $Script:InfoVars.Add("TPM.Version", "0")        
-    } else {
+    if ($objWMI) {
         $Script:InfoVars.Add("TPM.Found", "True")
         $Script:InfoVars.Add("TPM.Enabled", $objWMI.IsEnabled_InitialValue.ToString())
         $Script:InfoVars.Add("TPM.Activated", $objWMI.IsActivated_InitialValue.ToString())
         $Script:InfoVars.Add("TPM.Version", $objWMI.PhysicalPresenceVersionInfo.ToString())        
+    } else {
+        Write-RFLLog -Message "null object" -LogLevel 2
+        $Script:InfoVars.Add("TPM.Found", "False")
+        $Script:InfoVars.Add("TPM.Enabled", "False")
+        $Script:InfoVars.Add("TPM.Activated", "False")
+        $Script:InfoVars.Add("TPM.Version", "0")        
     }
 }
 #endregion
@@ -567,6 +615,9 @@ function Invoke-RFLPreFlightCheck {
         Name: Invoke-RFLPreFlightCheck
         Author: Raphael Perez
         DateCreated: 16 April 2020 (v0.1)
+        Update: 20 December 2023 (v0.2)
+            #only show errors for battery if required power is enabled
+            #only show errors for network if required network is enabled
 
     .EXAMPLE
         Test-RFLPreFlightCheck
@@ -584,22 +635,27 @@ function Invoke-RFLPreFlightCheck {
         $script:TotalErrors++
     }
 
-    Write-RFLLog -Message "Performing IP Address Checks"
-    if (-not $Script:InfoVars["Network.Connected"]) {
-        Write-RFLLog -Message "Error" -LogLevel 3
-        $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\red.png" -f $env:Temp); 'Check' = 'Invalid IP Address'; 'Status' = 'Error'; 'CheckColor' = 'red' }
-        $script:TotalWarnings++
-    }
-
-    Write-RFLLog -Message "Performing Ping Checks"
-    $SCCMServers | ForEach-Object {
-        $objItem = $_
-        Write-RFLLog -Message "Checking $($objItem) "
-        if (-not (Test-Connection -BufferSize 32 -Count 1 -ComputerName $objItem -Quiet)) {
+    Write-RFLLog -Message "Performing Network checks"
+    if ($RequireNetwork) {
+        Write-RFLLog -Message "Performing Network connected"
+        if (-not $Script:InfoVars["Network.Connected"]) {
             Write-RFLLog -Message "Error" -LogLevel 3
-            $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\warning.png" -f $env:Temp); 'Check' = "Ping $($objItem)"; 'Status' = 'Warning'; 'CheckColor' = 'yellow' }
-            $script:TotalWarnings++
+            $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\red.png" -f $env:Temp); 'Check' = 'Network not connected'; 'Status' = 'Error'; 'CheckColor' = 'red' }
+            $script:TotalErrors++
+        } else {
+            Write-RFLLog -Message "Performing Ping Checks"
+            $Servers | ForEach-Object {
+                $objItem = $_
+                Write-RFLLog -Message "Checking $($objItem) "
+                if (-not (Test-Connection -BufferSize 32 -Count 1 -ComputerName $objItem -Quiet)) {
+                    Write-RFLLog -Message "Error" -LogLevel 3
+                    $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\warning.png" -f $env:Temp); 'Check' = "Ping $($objItem)"; 'Status' = 'Warning'; 'CheckColor' = 'yellow' }
+                    $script:TotalWarnings++
+                }
+            }
         }
+    } else {
+        Write-RFLLog -Message "Ignoring Network checks as Parameter RequireNetwork is not set" -LogLevel 2
     }
 
     if ($RequireUEFI) {
@@ -627,30 +683,43 @@ function Invoke-RFLPreFlightCheck {
     }
 
     if (@('8','9','10','11','12','14','18','21','31') -contains $Script:InfoVars["SystemEnclosure.ChassisTypes"]) { #laptop
-        Write-RFLLog -Message "Power Options"
-        if (-not $Script:InfoVars["BatteryStatus.PowerOnline"]) {
-            Write-RFLLog -Message "Error" -LogLevel 3
-            $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\red.png" -f $env:Temp); 'Check' = "Power Connection"; 'Status' = 'Error'; 'CheckColor' = 'red' }
-            $script:TotalErrors++
-        }
-
-        Write-RFLLog -Message "Performing Battery Checks"
-        if ($Script:InfoVars["Battery.Batterystatus"] -ne 2) {
-            Write-RFLLog -Message "Error" -LogLevel 3
-            $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\red.png" -f $env:Temp); 'Check' = 'Power Check'; 'Status' = 'Error'; 'CheckColor' = 'red' }
-            $script:TotalErrors++
-        }
-
-        if ($Script:InfoVars["Battery.EstimatedChargeRemaining"] -lt 50) {
-            Write-RFLLog -Message "Error" -LogLevel 3
-            $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\red.png" -f $env:Temp); 'Check' = 'Battery charged'; 'Status' = 'Error'; 'CheckColor' = 'red' }
+        if ((-not $Script:InfoVars["BatteryStatus.WMI"]) -and (-not $Script:InfoVars["Battery.WMI"])) {  #unable to identify if power cable via WMI. Generating warning
+            Write-RFLLog -Message "WMI Battery"
+            Write-RFLLog -Message "Warning" -LogLevel 3
+            $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\warning.png" -f $env:Temp); 'Check' = "Unable to identify Power Connection"; 'Status' = 'Warning'; 'CheckColor' = 'yellow' }
             $script:TotalWarnings++
-        }
+        } else {
+            if ($RequirePower) {
+                if ($Script:InfoVars["BatteryStatus.WMI"]) { #battery status from BatteryStatus got collected correctly
+                    Write-RFLLog -Message "Power Options"
+                    if (-not $Script:InfoVars["BatteryStatus.PowerOnline"]) {
+                        Write-RFLLog -Message "Error" -LogLevel 3
+                        $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\red.png" -f $env:Temp); 'Check' = "Power Connection"; 'Status' = 'Error'; 'CheckColor' = 'red' }
+                        $script:TotalErrors++
+                    }
+                } else { #check battery from the batterystatus
+                    Write-RFLLog -Message "Performing Battery Checks"
+                    if ($Script:InfoVars["Battery.Batterystatus"] -ne 2) {
+                        Write-RFLLog -Message "Error" -LogLevel 3
+                        $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\red.png" -f $env:Temp); 'Check' = 'Battery Status'; 'Status' = 'Error'; 'CheckColor' = 'red' }
+                        $script:TotalErrors++
+                    }
+                }
+            } else {
+                Write-RFLLog -Message "Ignoring Power checks as Parameter RequirePower is not set"
+            }
 
-        if ($Script:InfoVars["BatteryStatus.Critical"]) {
-            Write-RFLLog -Message "Warning" -LogLevel 2
-            $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\warning.png" -f $env:Temp); 'Check' = 'Battery critical state'; 'Status' = 'Warning'; 'CheckColor' = 'yellow' }
-            $script:TotalWarnings++
+            if ($Script:InfoVars["Battery.EstimatedChargeRemaining"] -lt $MinBatteryLevel) {
+                Write-RFLLog -Message "Error" -LogLevel 3
+                $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\red.png" -f $env:Temp); 'Check' = 'Battery charged'; 'Status' = 'Error'; 'CheckColor' = 'red' }
+                $script:TotalWarnings++
+            }
+
+            if ($Script:InfoVars["BatteryStatus.Critical"]) {
+                Write-RFLLog -Message "Warning" -LogLevel 2
+                $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\warning.png" -f $env:Temp); 'Check' = 'Battery critical state'; 'Status' = 'Warning'; 'CheckColor' = 'yellow' }
+                $script:TotalWarnings++
+            }
         }
     }
 
@@ -687,6 +756,8 @@ function Invoke-RFLPreFlightCheck {
 
     if (($script:TotalErrors -eq 0) -and ($script:TotalWarnings -eq 0)) {
         $arrChecks += New-Object -TypeName PSObject -Property @{'Image' = ("{0}\green.png" -f $env:Temp); 'Check' = "All checks passed. No issues found"; 'Status' = 'Success'; 'CheckColor' = 'green' }
+        $script:StartTimer = $true
+    } elseif (($script:TotalErrors -eq 0) -and ($script:TotalWarnings -gt 0)) {
         $script:StartTimer = $true
     }
 
@@ -737,7 +808,7 @@ function Invoke-RFLCloseForm {
 #endregion
 
 #region Variables
-$script:ScriptVersion = '0.1'
+$script:ScriptVersion = '0.4'
 $script:LogFilePath = $env:Temp
 $Script:LogFileFileName = 'Invoke-RFLOSDPreFlightChecks.log'
 $script:ScriptLogFilePath = "$($script:LogFilePath)\$($Script:LogFileFileName)"
@@ -847,11 +918,11 @@ try {
     }
 
     Write-RFLLog -Message "Importing Assembly System.Windows.Forms" 
-    [System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')  				| out-null
+    [System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | out-null
     Write-RFLLog -Message "Importing Assembly presentationframework" 
-    [System.Reflection.Assembly]::LoadWithPartialName('presentationframework') 				| out-null
+    [System.Reflection.Assembly]::LoadWithPartialName('presentationframework') | out-null
     Write-RFLLog -Message "Importing Assembly PresentationCore" 
-    [System.Reflection.Assembly]::LoadWithPartialName('PresentationCore')      				| out-null
+    [System.Reflection.Assembly]::LoadWithPartialName('PresentationCore') | out-null
     Write-RFLLog -Message "EnableVisualStyles" 
     [System.Windows.Forms.Application]::EnableVisualStyles()
 
@@ -917,7 +988,6 @@ try {
         Invoke-RFLCloseForm
     })
 
-
     $script:hash.Form.Add_Closing({
         if ($Script:AllowContinue)
         {
@@ -962,8 +1032,6 @@ try {
     Write-RFLLog -Message "Show Form"
     $null = $script:hash.Form.ShowDialog()
 
-    $script:hash.imgLogo = $Null
-
     if ($script:TotalErrors -gt 0) {
         throw "Unable to complete task sequence. OSDPreFlighCheck failed"
     }
@@ -971,14 +1039,6 @@ try {
     Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
     Exit 3000
 } finally {
-    Get-Variable | Where-Object { ($StartUpVariables.Name -notcontains $_.Name) -and (@('StartUpVariables','ScriptLogFilePath') -notcontains $_.Name) } | ForEach-Object {
-        Try { 
-            Write-RFLLog -Message "Removing Variable $($_.Name)"
-            Remove-Variable -Name "$($_.Name)" -Force -Scope "global" -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
-        } Catch { 
-            Write-RFLLog -Message "Unable to remove variable $($_.Name)"
-        }
-    }
     @('logo.png', 'green.png', 'red.png', 'warning.png') | ForEach-Object {
         $item = $_
         Write-RFLLog -Message "Trying to remove temporary file $(('{0}\{1}' -f $env:Temp, $item))" 

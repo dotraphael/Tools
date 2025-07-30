@@ -22,6 +22,8 @@
                 #Converted from VBS to PowerShell (https://thedesktopteam.com/raphael/sccm-script-to-get-some-mdt-variables/)
         Update: 21 April 2021 (v0.2)
                 #Added BIOSVerionInteger 
+        Update: 25 July 2025 (v0.3)
+                #Added VMware20,1 to VirtualHosts
 
     .EXAMPLE
         .\Invoke-RFLTSGather.ps1
@@ -46,8 +48,6 @@ param (
     [string]
     $RunType
 )
-
-$StartUpVariables = Get-Variable
 
 #region Functions
 #region PowerShell-Get-Subnet-NetworkID
@@ -505,6 +505,19 @@ function Get-RFLBiosInfo {
     .EXAMPLE
         Get-RFLBiosInfo
 #>
+<#
+#Convert BIOS Serial to Integer - Test
+$Validcharacters = 'ABCDEFGHKLMNOPRSTUVWXYZ0123456789'
+$biosSerialNumber = '1.20.1'
+[int]$BIOSVersionInteger = 0
+for($i=0;$i -le $biosSerialNumber.Length-1;$i++) {
+    if ($Validcharacters -match $biosSerialNumber[$i]) {
+        $BIOSVersionInteger = $BIOSVersionInteger + [int]($biosSerialNumber[$i])
+    }
+}
+
+write-host $BIOSVersionInteger
+#>
     Write-RFLLog -Message 'Getting Win32_BIOS'
     $bios = Get-WmiObject -Class 'Win32_BIOS'
     $Script:TSvars.Add("SerialNumber", $bios.SerialNumber)
@@ -911,7 +924,7 @@ function Get-RFLTPM {
 #endregion
 
 #region Variables
-$script:ScriptVersion = '0.1'
+$script:ScriptVersion = '0.3'
 $script:LogFilePath = $env:Temp
 $Script:LogFileFileName = 'Invoke-RFLTSGather.log'
 $script:ScriptLogFilePath = "$($script:LogFilePath)\$($Script:LogFileFileName)"
@@ -919,7 +932,7 @@ $Script:TSvars = @{}
 $Script:DesktopChassisTypes = @("3","4","5","6","7","13","15","16")
 $Script:LatopChassisTypes = @("8","9","10","11","12","14","18","21","30","31")
 $Script:ServerChassisTypes = @("23")
-$Script:VirtualHosts = @{ "Virtual Machine"="Hyper-V"; "VMware Virtual Platform"="VMware"; "VMware7,1"="VMware"; "VirtualBox"="VirtualBox"; "Xen"="Xen"; "KVM"="KVM" }
+$Script:VirtualHosts = @{ "Virtual Machine"="Hyper-V"; "VMware Virtual Platform"="VMware"; "VMware7,1"="VMware"; "VMware20,1"="VMware"; "VirtualBox"="VirtualBox"; "Xen"="Xen"; "KVM"="KVM" }
 $Script:EncryptionMethods = @{ 0 = "UNSPECIFIED"; 1 = 'AES_128_WITH_DIFFUSER'; 2 = "AES_256_WITH_DIFFUSER"; 3 = 'AES_128'; 4 = "AES_256"; 5 = 'HARDWARE_ENCRYPTION'; 6 = "AES_256"; 7 = "XTS_AES_256" }
 #endregion
 
@@ -964,14 +977,6 @@ try {
     Write-RFLLog -Message "An error occurred $($_)" -LogLevel 3
     Exit 3000
 } finally {
-    Get-Variable | Where-Object { ($StartUpVariables.Name -notcontains $_.Name) -and (@('StartUpVariables','ScriptLogFilePath') -notcontains $_.Name) } | ForEach-Object {
-        Try { 
-            Write-RFLLog -Message "Removing Variable $($_.Name)"
-            Remove-Variable -Name "$($_.Name)" -Force -Scope "global" -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
-        } Catch { 
-            Write-RFLLog -Message "Unable to remove variable $($_.Name)"
-        }
-    }
     Write-RFLLog -Message "*** Ending ***"
 }
 #endregion
